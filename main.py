@@ -34,35 +34,35 @@ async def stream_tts(request_json):
 
     max_retries = 10
     for attempt in range(max_retries):
-        print(f"尝试 {attempt+1}/{max_retries}")
+        print(f"尝试 {attempt + 1}/{max_retries}")
         audio_data = bytearray()
-        
+
         try:
             async with websockets.connect(api_url, additional_headers=header, ping_interval=None) as ws:
                 await ws.send(full_client_request)
-                
+
                 while True:
                     try:
                         res = await ws.recv()
                         done = parse_response(res, audio_data)
-                        
+
                         if done == 1:  # 成功完成
                             return bytes(audio_data)
                             # retry
                         elif done == -1:
-                            break                        
+                            break
                     except websockets.exceptions.ConnectionClosed as e:
                         print(f"connection close: {e}")
                         break
-                        
+
         except Exception as e:
             print(f"connection error: {e}")
-            
+
         # 只在最后一次尝试并有数据时返回部分数据
         if attempt == max_retries - 1 and len(audio_data) > 0:
             print("response part data")
             return bytes(audio_data)
-            
+
     # raise Exception("response generate error")
 
 
@@ -97,7 +97,7 @@ def parse_response(res, audio_data: bytearray):
         print(f"          Error message code: {code}")
         print(f"          Error message size: {msg_size} bytes")
         print(f"               Error message: {error_msg}")
-        if code== 3031 or code == 3032 or code == 3040:
+        if code == 3031 or code == 3032 or code == 3040:
             return -1
         return 1
     elif message_type == 0xc:
@@ -117,11 +117,14 @@ app = FastAPI()
 @app.get("/synthesize")
 async def synthesize(
         text: str,
-        emotion: str = "ICL_zh_female_huoponvhai_tob",
-        text_id: str = str(uuid.uuid4()),
+        voice_type: str = "ICL_zh_female_huoponvhai_tob",
+        emotion:str = "xxx",
+        req_id: str = str(uuid.uuid4()),
+        rate:int = 24000,
         speed: float = 1.1,
         volume: float = 1.0,
         pitch: float = 1.0,
+        encoding: str = "mp3",
 ):
     request_json = {
         "app": {
@@ -133,22 +136,38 @@ async def synthesize(
             "uid": "388808087185088"
         },
         "audio": {
-            "voice_type": emotion,
-            "encoding": "mp3",
+            "voice_type": voice_type,
+            "encoding": encoding,
+            "rate": rate,
             "speed_ratio": speed,
             "volume_ratio": volume,
             "pitch_ratio": pitch,
+            "emotion": emotion,
         },
         "request": {
-            "reqid": text_id,
+            "reqid": req_id,
             "text": text,
             "text_type": "plain",
             "operation": "submit"
         }
     }
-    audio_data = await stream_tts(request_json)
-    return Response(content=audio_data, media_type="audio/mp3")
 
+    audio_data = await stream_tts(request_json)
+
+    if encoding == "mp3":
+        return Response(content=audio_data, media_type="audio/mp3")
+    elif encoding == "pcm":
+        headers = {
+            "Content-Type": "audio/l16",
+            "X-Sample-Rate": str(rate),
+            "X-Channels": "1",
+            "X-Bits-Per-Sample": "16"
+        }
+        return Response(
+            content=audio_data,
+            media_type="audio/l16",
+            headers=headers
+        )
 
 if __name__ == '__main__':
     uvicorn.run(app, host="0.0.0.0", port=10012)
