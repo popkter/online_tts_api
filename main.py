@@ -30,18 +30,40 @@ async def stream_tts(request_json):
     full_client_request = bytearray(default_header)
     full_client_request.extend((len(payload_bytes)).to_bytes(4, 'big'))
     full_client_request.extend(payload_bytes)
-
-    audio_data = bytearray()  # 用于存储音频数据
     header = {"Authorization": f"Bearer; {token}"}
-    async with websockets.connect(api_url, additional_headers=header, ping_interval=None) as ws:
-        await ws.send(full_client_request)
-        while True:
-            res = await ws.recv()
-            done = parse_response(res, audio_data)
-            if done:
-                break
-        ws.close()
-    return bytes(audio_data)
+
+    max_retries = 10
+    for attempt in range(max_retries):
+        print(f"尝试 {attempt+1}/{max_retries}")
+        audio_data = bytearray()
+        
+        try:
+            async with websockets.connect(api_url, additional_headers=header, ping_interval=None) as ws:
+                await ws.send(full_client_request)
+                
+                while True:
+                    try:
+                        res = await ws.recv()
+                        done = parse_response(res, audio_data)
+                        
+                        if done == 1:  # 成功完成
+                            return bytes(audio_data)
+                            # retry
+                        elif done == -1:
+                            break                        
+                    except websockets.exceptions.ConnectionClosed as e:
+                        print(f"connection close: {e}")
+                        break
+                        
+        except Exception as e:
+            print(f"connection error: {e}")
+            
+        # 只在最后一次尝试并有数据时返回部分数据
+        if attempt == max_retries - 1 and len(audio_data) > 0:
+            print("response part data")
+            return bytes(audio_data)
+            
+    # raise Exception("response generate error")
 
 
 def parse_response(res, audio_data: bytearray):
@@ -56,15 +78,15 @@ def parse_response(res, audio_data: bytearray):
         print(f"           Header extensions: {header_extensions}")
     if message_type == 0xb:  # audio-only server response
         if message_type_specific_flags == 0:
-            return False
+            return 0
         else:
             sequence_number = int.from_bytes(payload[:4], "big", signed=True)
             payload_size = int.from_bytes(payload[4:8], "big", signed=False)
             payload = payload[8:]
             audio_data.extend(payload)  # 追加音频数据
             if sequence_number < 0:
-                return True
-            return False
+                return 1
+            return 0
     elif message_type == 0xf:
         code = int.from_bytes(payload[:4], "big", signed=False)
         msg_size = int.from_bytes(payload[4:8], "big", signed=False)
@@ -75,7 +97,9 @@ def parse_response(res, audio_data: bytearray):
         print(f"          Error message code: {code}")
         print(f"          Error message size: {msg_size} bytes")
         print(f"               Error message: {error_msg}")
-        return True
+        if code== 3031 or code == 3032 or code == 3040:
+            return -1
+        return 1
     elif message_type == 0xc:
         msg_size = int.from_bytes(payload[:4], "big", signed=False)
         payload = payload[4:]
@@ -84,7 +108,7 @@ def parse_response(res, audio_data: bytearray):
         print(f"            Frontend message: {payload}")
     else:
         print("undefined message type!")
-        return True
+        return 1
 
 
 app = FastAPI()
@@ -93,7 +117,7 @@ app = FastAPI()
 @app.get("/synthesize")
 async def synthesize(
         text: str,
-        emotion: str = "BV407_V2_streaming",
+        emotion: str = "ICL_zh_female_huoponvhai_tob",
         text_id: str = str(uuid.uuid4()),
         speed: float = 1.1,
         volume: float = 1.0,
