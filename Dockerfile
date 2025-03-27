@@ -8,7 +8,8 @@ WORKDIR /app
 COPY requirements.txt .
 
 # 安装 Python 依赖项
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -i https://pypi.mirrors.ustc.edu.cn/simple requests --no-cache-dir -r requirements.txt
+#RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用程序代码
 COPY . .
