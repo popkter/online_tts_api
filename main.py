@@ -1,17 +1,13 @@
-import websockets
+import asyncio
 import uuid
+import websockets
 import json
 import gzip
 from fastapi import FastAPI, Response
 import uvicorn
 from dotenv import load_dotenv
 import os
-
-MESSAGE_TYPES = {11: "audio-only server response", 12: "frontend server response", 15: "error message from server"}
-MESSAGE_TYPE_SPECIFIC_FLAGS = {0: "no sequence number", 1: "sequence number > 0",
-                               2: "last message from server (seq < 0)", 3: "sequence number < 0"}
-MESSAGE_SERIALIZATION_METHODS = {0: "no serialization", 1: "JSON", 15: "custom type"}
-MESSAGE_COMPRESSIONS = {0: "no compression", 1: "gzip", 15: "custom compression method"}
+import uvloop
 
 load_dotenv()
 appid = os.getenv("APP_ID")
@@ -39,6 +35,10 @@ async def stream_tts(request_json):
 
         try:
             async with websockets.connect(api_url, additional_headers=header, ping_interval=None) as ws:
+                response_headers = ws.response.headers
+                print("Request Body", request_json)
+                print("Response Headers:", response_headers)  # 打印响应头
+
                 await ws.send(full_client_request)
 
                 while True:
@@ -62,8 +62,6 @@ async def stream_tts(request_json):
         if attempt == max_retries - 1 and len(audio_data) > 0:
             print("response part data")
             return bytes(audio_data)
-
-    # raise Exception("response generate error")
 
 
 def parse_response(res, audio_data: bytearray):
@@ -118,14 +116,17 @@ app = FastAPI()
 async def synthesize(
         text: str,
         voice_type: str = "ICL_zh_female_huoponvhai_tob",
-        emotion:str = "xxx",
-        req_id: str = str(uuid.uuid4()),
-        rate:int = 24000,
+        emotion: str = "xxx",
+        req_id: str = None,  # 默认 None，内部生成
+        rate: int = 24000,
         speed: float = 1.1,
         volume: float = 1.0,
         pitch: float = 1.0,
         encoding: str = "mp3",
 ):
+    if req_id is None:
+        req_id = str(uuid.uuid4())  # 动态生成唯一 ID
+
     request_json = {
         "app": {
             "appid": appid,
@@ -169,5 +170,8 @@ async def synthesize(
             headers=headers
         )
 
+
 if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port=10012)
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    uvicorn.run("main:app", host="0.0.0.0", port=10012, reload=False, workers=4, limit_concurrency=100)  # ✅ 使用字符串
+    # uvicorn.run(app, host="0.0.0.0", port=10012, workers=4)
