@@ -204,7 +204,7 @@ def parser_response(res) -> Response:
     return response
 
 
-async def run_demo(appId: str, token: str, speaker: str, text: str, output_path: str):
+async def run_demo(appId: str, token: str, speaker: str, text: list[str], output_path: str):
     ws_header = {
         "X-Api-App-Key": appId,
         "X-Api-Access-Key": token,
@@ -229,7 +229,9 @@ async def run_demo(appId: str, token: str, speaker: str, text: str, output_path:
             raise RuntimeError('start session failed!')
 
         # 发送文本
-        await send_text(ws, speaker, text, session_id)
+        for e in text:
+            await send_text(ws, speaker,e, session_id)
+
         await finish_session(ws, session_id)
         async with aiofiles.open(output_path, mode="wb") as output_file:
             while True:
@@ -323,6 +325,15 @@ if __name__ == "__main__":
     token = os.getenv("TOKEN")
 
     speaker = 'zh_female_shuangkuaisisi_moon_bigtts'
-    text = '明朝开国皇帝朱元璋也称这本书为,万物之根'
+
+    """
+
+"""
+    text = ['从前有个可爱的', '小姑娘，', '谁见了都喜欢，但最喜欢', '她的是她的奶奶，简直是她要什么就给她什么。',
+            '一次，奶奶送给', '小姑娘一顶用丝绒做的小红帽，戴在她的头上', '正好合适。从此，', ' 姑娘再也不愿意戴任',
+            ' 何别的帽子，于是大家便叫她', '小红帽，一天', ' ，妈妈对小红帽说：“来，', '小红帽，这里有一块蛋糕和一瓶',
+            '葡萄酒，快给奶奶', '送去，奶奶生病了，身子很虚弱，吃了这', '些就会好一些的。趁着现在天还没有热，',
+            '赶紧动身吧。在路上要好好走，不要跑，', '也不要离开大路，否则你会摔跤的', '，那样奶奶就什么也吃不上了',
+            '。到奶奶家的时候，别忘', '了说‘早上好’，也不', '要一进屋就东瞧西瞅。”']
     output_path = 'output.mp3'
     asyncio.run(run_demo(appId, token, speaker, text, output_path))
