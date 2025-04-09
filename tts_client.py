@@ -1,47 +1,65 @@
 import asyncio
 import json
+import os
+import random
 import uuid
 
 import websockets
 
 # WebSocket 服务器地址
-WS_SERVER_URI = "ws://localhost:8765"  # 替换成你的 WebSocket 服务端地址
+WS_SERVER_URI = "ws://localhost:10013"  # 替换成你的 WebSocket 服务端地址
 
 text_segments = ['从前有个可', '爱的小姑娘，', '谁见了都喜欢，但最喜欢', '她的是她的奶奶，简直是她要什么就给她什么。',
                  '一次，奶奶送给', '小姑娘一顶用丝绒做的小红帽，戴在她的头上', '正好合适。从此，',
                  '小姑娘再也不愿意戴任',
-                 '何别的帽子，于是大家便叫她', '小红帽，一天', ' ，妈妈对小红帽说："来，', '小红帽，这里有一块蛋糕和一瓶',
-                 '葡萄酒，快给奶奶', '送去，奶奶生病了，身子很虚弱，吃了这', '些就会好一些的。趁着现在天还没有热，',
-                 '赶紧动身吧。在路上要好好走，不要跑，', '也不要离开大路，否则你会摔跤的', '，那样奶奶就什么也吃不上了',
-                 '。到奶奶家的时候，别忘', '了说早上好', '也不', '要一进屋就东瞧西瞅。"']
+                 '何别的帽子，于是大家便叫她', '小红帽']
 
+
+# text_segments = ['从前有个可', '爱的小姑娘，', '谁见了都喜欢，但最喜欢', '她的是她的奶奶，简直是她要什么就给她什么。',
+#                  '一次，奶奶送给', '小姑娘一顶用丝绒做的小红帽，戴在她的头上', '正好合适。从此，',
+#                  '小姑娘再也不愿意戴任',
+#                  '何别的帽子，于是大家便叫她', '小红帽，一天', ' ，妈妈对小红帽说："来，', '小红帽，这里有一块蛋糕和一瓶',
+#                  '葡萄酒，快给奶奶', '送去，奶奶生病了，身子很虚弱，吃了这', '些就会好一些的。趁着现在天还没有热，',
+#                  '赶紧动身吧。在路上要好好走，不要跑，', '也不要离开大路，否则你会摔跤的', '，那样奶奶就什么也吃不上了',
+#                  '。到奶奶家的时候，别忘', '了说早上好', '也不', '要一进屋就东瞧西瞅。"']
+#
 
 async def send_messages(ws):
     """异步发送消息给服务端"""
     session_id = str(uuid.uuid4())
 
-    start_request = {'text': "",
-                     'request_id': session_id,
-                     'action': 'start'}
+    #启动新一轮语音合成，需要传递全量参数，定义device_id, request_id, 音频格式, 采样率, 语速, 音量, 发音人
+    start_request = {
+        "device_id": "caf",
+        "request_id": session_id,
+        "action": "start",
+        "audio_format": "pcm",
+        "sample_rate": 24000,
+        "speech_rate": 50,
+        "loudness_rate": 0,
+        "voice_type": "zh_male_yangguangqingnian_emo_v2_mars_bigtts"
+    }
 
-    end_request = {'text': "",
-                   'request_id': session_id,
-                   'action': 'end'}
+    #结束一轮合成
+    end_request = {
+        "request_id": session_id,
+        "action": "end",
+    }
 
     await ws.send(json.dumps(start_request))
 
     print("已发送开始会话请求")
 
     for text_segment in text_segments:
+        #合成音频
         await ws.send(json.dumps({
-            'text': text_segment,
-            'request_id': session_id,
-            'action': 'synthesize',
+            "text": text_segment,
+            "request_id": session_id,
+            "action": "synthesize",
         }))
         print(f"发送: {text_segment}")
 
     await ws.send(json.dumps(end_request))
-
     # while True:
     #     msg = input("请输入要发送的消息（输入 exit 退出）：")
     #     if msg.lower() == "exit":
@@ -56,9 +74,9 @@ async def send_messages(ws):
 
 async def receive_messages(ws):
     """持续监听服务端消息"""
+    output_file = f"output_combined_{uuid.uuid4()}.pcm"
     try:
         # 创建输出文件
-        output_file = f"output_combined_{uuid.uuid4()}.mp3"
         print(f"音频将保存到: {output_file}")
         
         while True:
@@ -96,14 +114,26 @@ async def receive_messages(ws):
         print(f"音频已保存到: {output_file}")
 
 
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
+
+
 async def main():
-    async with websockets.connect(WS_SERVER_URI) as websocket:
+    from dotenv import load_dotenv
+    # 加载环境变量
+    load_dotenv()
+
+    token = os.getenv("TOKEN")
+
+    async with websockets.connect(WS_SERVER_URI, additional_headers={"Authorization": f"Bearer {token}"}) as ws:
         print("已连接到服务器。")
 
         # 使用gather同时执行所有任务
         await asyncio.gather(
-            send_messages(websocket),
-            receive_messages(websocket)
+            send_messages(ws),
+            receive_messages(ws)
         )
 
 

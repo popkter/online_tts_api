@@ -6,4 +6,4 @@ python-dotenv~=1.0.1
 asyncio~=3.4.3
 uvloop~=0.21.0
 aiofiles~=24.1.0
-websocket~=0.2.1
+#websocket~=0.2.1

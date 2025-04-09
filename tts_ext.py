@@ -1,16 +1,9 @@
-import asyncio
 import json
-import os
-import uuid
+from typing import Optional
 
-import aiofiles
-import websocket
-import websockets
-from dotenv import load_dotenv
 from websockets.asyncio.client import ClientConnection
 
 # https://www.volcengine.com/docs/6561/1329505#%E7%A4%BA%E4%BE%8Bsamples
-
 
 PROTOCOL_VERSION = 0b0001
 DEFAULT_HEADER_SIZE = 0b0001
@@ -92,13 +85,13 @@ class Header:
         ])
 
 
-class Optional:
-    def __init__(self, event: int = EVENT_NONE, sessionId: str = None, sequence: int = None):
+class Option:
+    def __init__(self, event: int = EVENT_NONE, session_id: str = None, sequence: int = None):
         self.event = event
-        self.sessionId = sessionId
+        self.sessionId = session_id
         self.errorCode: int = 0
-        self.connectionId: str | None = None
-        self.response_meta_json: str | None = None
+        self.connectionId: Optional[str] = None
+        self.response_meta_json: Optional[str] = None
         self.sequence = sequence
 
     # 转成 byte 序列
@@ -117,17 +110,17 @@ class Optional:
 
 
 class Response:
-    def __init__(self, header: Header, optional: Optional):
+    def __init__(self, header: Header, optional: Option):
         self.optional = optional
         self.header = header
-        self.payload: bytes | None = None
+        self.payload: Optional[bytes] = None
 
     def __str__(self):
         return super().__str__()
 
 
 # 发送事件
-async def send_event(ws: websocket, header: bytes, optional: bytes | None = None,
+async def send_event(ws, header: bytes, optional: Optional[bytes] = None,
                      payload: bytes = None):
     full_client_request = bytearray(header)
     if optional is not None:
@@ -161,7 +154,7 @@ def read_res_payload(res: bytes, offset: int):
 def parser_response(res) -> Response:
     if isinstance(res, str):
         raise RuntimeError(res)
-    response = Response(Header(), Optional())
+    response = Response(Header(), Option())
     # 解析结果
     # header
     header = response.header
@@ -203,59 +196,21 @@ def parser_response(res) -> Response:
         response.payload, offset = read_res_payload(res, offset)
     return response
 
-
-async def run_demo(appId: str, token: str, speaker: str, text: list[str], output_path: str):
-    ws_header = {
-        "X-Api-App-Key": appId,
-        "X-Api-Access-Key": token,
-        "X-Api-Resource-Id": 'volc.service_type.10029',
-        "X-Api-Connect-Id": uuid.uuid4(),
-    }
-    url = 'wss://openspeech.bytedance.com/api/v3/tts/bidirection'
-    # websocket.create_connection(url,ws_header) as ws
-
-    async with websockets.connect(url, additional_headers=ws_header, max_size=1000000000) as ws:
-        await start_connection(ws)
-        res = parser_response(await ws.recv())
-        print_response(res, 'start_connection res:')
-        if res.optional.event != EVENT_ConnectionStarted:
-            raise RuntimeError("start connection failed")
-
-        session_id = uuid.uuid4().__str__().replace('-', '')
-        await start_session(ws, speaker, session_id)
-        res = parser_response(await ws.recv())
-        print_response(res, 'start_session res:')
-        if res.optional.event != EVENT_SessionStarted:
-            raise RuntimeError('start session failed!')
-
-        # 发送文本
-        for e in text:
-            await send_text(ws, speaker,e, session_id)
-
-        await finish_session(ws, session_id)
-        async with aiofiles.open(output_path, mode="wb") as output_file:
-            while True:
-                res = parser_response(await ws.recv())
-                print_response(res, 'send_text res:')
-                if res.optional.event == EVENT_TTSResponse and res.header.message_type == AUDIO_ONLY_RESPONSE:
-                    await output_file.write(res.payload)
-                elif res.optional.event in [EVENT_TTSSentenceStart, EVENT_TTSSentenceEnd]:
-                    continue
-                else:
-                    break
-        await finish_connection(ws)
-        res = parser_response(await ws.recv())
-        print_response(res, 'finish_connection res:')
-        print('===> 退出程序')
-
-
 def print_response(res, tag: str):
     print(f'===>{tag} header:{res.header.__dict__}')
     print(f'===>{tag} optional:{res.optional.__dict__}')
 
 
-def get_payload_bytes(uid='1234', event=EVENT_NONE, text='', speaker='', audio_format='mp3',
-                      audio_sample_rate=24000):
+def get_payload_bytes(
+        uid='1234',
+        event=EVENT_NONE,
+        text='',
+        speaker='',
+        audio_format='mp3',
+        audio_sample_rate=24000,
+        audio_speech_rate=0,
+        audio_loudness_rate=0
+):
     return str.encode(json.dumps(
         {
             "user": {"uid": uid},
@@ -266,35 +221,46 @@ def get_payload_bytes(uid='1234', event=EVENT_NONE, text='', speaker='', audio_f
                 "speaker": speaker,
                 "audio_params": {
                     "format": audio_format,
-                    "sample_rate": audio_sample_rate
+                    "sample_rate": audio_sample_rate,
+                    "speech_rate": audio_speech_rate,
+                    "loudness_rate": audio_loudness_rate,
+                    "enable_language_detector": True,
+                    "disable_markdown_filter": True
                 }
             }
         }
     ))
 
 
-async def start_connection(websocket):
+async def start_connection(ws):
     header = Header(message_type=FULL_CLIENT_REQUEST, message_type_specific_flags=MsgTypeFlagWithEvent).as_bytes()
-    optional = Optional(event=EVENT_Start_Connection).as_bytes()
+    optional = Option(event=EVENT_Start_Connection).as_bytes()
     payload = str.encode("{}")
-    return await send_event(websocket, header, optional, payload)
+    return await send_event(ws, header, optional, payload)
 
 
-async def start_session(websocket, speaker, session_id):
+async def start_session(ws, speaker, session_id, audio_format, sample_rate, speech_rate, loudness_rate):
     header = Header(message_type=FULL_CLIENT_REQUEST,
                     message_type_specific_flags=MsgTypeFlagWithEvent,
                     serial_method=JSON
                     ).as_bytes()
-    optional = Optional(event=EVENT_StartSession, sessionId=session_id).as_bytes()
-    payload = get_payload_bytes(event=EVENT_StartSession, speaker=speaker)
-    return await send_event(websocket, header, optional, payload)
+    optional = Option(event=EVENT_StartSession, session_id=session_id).as_bytes()
+    payload = get_payload_bytes(
+        event=EVENT_StartSession,
+        speaker=speaker,
+        audio_format=audio_format,
+        audio_sample_rate=sample_rate,
+        audio_speech_rate=speech_rate,
+        audio_loudness_rate=loudness_rate
+    )
+    return await send_event(ws, header, optional, payload)
 
 
 async def send_text(ws: ClientConnection, speaker: str, text: str, session_id):
     header = Header(message_type=FULL_CLIENT_REQUEST,
                     message_type_specific_flags=MsgTypeFlagWithEvent,
                     serial_method=JSON).as_bytes()
-    optional = Optional(event=EVENT_TaskRequest, sessionId=session_id).as_bytes()
+    optional = Option(event=EVENT_TaskRequest, session_id=session_id).as_bytes()
     payload = get_payload_bytes(event=EVENT_TaskRequest, text=text, speaker=speaker)
     return await send_event(ws, header, optional, payload)
 
@@ -304,7 +270,7 @@ async def finish_session(ws, session_id):
                     message_type_specific_flags=MsgTypeFlagWithEvent,
                     serial_method=JSON
                     ).as_bytes()
-    optional = Optional(event=EVENT_FinishSession, sessionId=session_id).as_bytes()
+    optional = Option(event=EVENT_FinishSession, session_id=session_id).as_bytes()
     payload = str.encode('{}')
     return await send_event(ws, header, optional, payload)
 
@@ -314,26 +280,6 @@ async def finish_connection(ws):
                     message_type_specific_flags=MsgTypeFlagWithEvent,
                     serial_method=JSON
                     ).as_bytes()
-    optional = Optional(event=EVENT_FinishConnection).as_bytes()
+    optional = Option(event=EVENT_FinishConnection).as_bytes()
     payload = str.encode('{}')
     return await send_event(ws, header, optional, payload)
-
-
-if __name__ == "__main__":
-    load_dotenv()
-    appId = os.getenv("APP_ID")
-    token = os.getenv("TOKEN")
-
-    speaker = 'zh_female_shuangkuaisisi_moon_bigtts'
-
-    """
-
-"""
-    text = ['从前有个可爱的', '小姑娘，', '谁见了都喜欢，但最喜欢', '她的是她的奶奶，简直是她要什么就给她什么。',
-            '一次，奶奶送给', '小姑娘一顶用丝绒做的小红帽，戴在她的头上', '正好合适。从此，', ' 姑娘再也不愿意戴任',
-            ' 何别的帽子，于是大家便叫她', '小红帽，一天', ' ，妈妈对小红帽说：“来，', '小红帽，这里有一块蛋糕和一瓶',
-            '葡萄酒，快给奶奶', '送去，奶奶生病了，身子很虚弱，吃了这', '些就会好一些的。趁着现在天还没有热，',
-            '赶紧动身吧。在路上要好好走，不要跑，', '也不要离开大路，否则你会摔跤的', '，那样奶奶就什么也吃不上了',
-            '。到奶奶家的时候，别忘', '了说‘早上好’，也不', '要一进屋就东瞧西瞅。”']
-    output_path = 'output.mp3'
-    asyncio.run(run_demo(appId, token, speaker, text, output_path))
