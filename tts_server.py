@@ -53,6 +53,7 @@ class RemoteTtsClient:
                     elif res.optional.event in [EVENT_ConnectionFinished, EVENT_ConnectionFailed]:
                         break
                     else:
+                        print("未处理的消息类型:", res.optional.event)
                         continue
                 finally:
                     print("结束")
@@ -180,11 +181,18 @@ class TTSServer:
 
                         # 定义音频回调函数
                         async def audio_callback(audio_data):
+                            # audio = audio_data.hex()
+                            # print(f'audio data size: {len(audio_data)} bytes', flush=True)
+                            # print('audio: ', audio_data, flush=True)
+                            # encoded_data = base64.b64encode(audio_data).decode('utf-8')
+                            # print(f'encoded_data: {encoded_data}', flush=True)
+                            payload: str = audio_data.decode("latin1") if audio_data else None
+                            print(f"payload: {payload}", flush=True)
                             # 发送音频数据给客户端
                             await websocket.send(json.dumps({
                                 'request_id': request_id,
                                 'status': 'success',
-                                'audio_data': audio_data.hex()
+                                'audio_data': payload
                             }))
 
                         # 根据device_id建立websocket连接
