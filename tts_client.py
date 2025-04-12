@@ -5,6 +5,10 @@ import uuid
 
 import websockets
 
+from tts_ext import EVENT_TTSResponse, EVENT_TTSSentenceStart, EVENT_TTSSentenceEnd, EVENT_SessionStarted, \
+    EVENT_SessionFinished, EVENT_StartSession, EVENT_FinishSession, EVENT_ConnectionStarted, EVENT_Start_Connection, \
+    EVENT_ConnectionFailed, EVENT_FinishConnection, EVENT_ConnectionFinished
+
 # WebSocket 服务器地址
 WS_SERVER_URI = "ws://localhost:10013"  # 替换成你的 WebSocket 服务端地址
 
@@ -54,30 +58,55 @@ async def send_messages(ws):
 
 async def receive_messages(ws: websockets):
     """持续监听服务端消息"""
-    output_file = f"output_combined_{uuid.uuid4()}.pcm"
+
+    output_file = 'output_request_id.pcm'
+
     try:
         # 创建输出文件
-        print(f"音频将保存到: {output_file}")
 
         async for message in ws:
             print(f"收到消息: {message[:100]}...")  # 只打印消息的前100个字符
 
             response_data = json.loads(message)
             # 检查是否是音频数据
-            if 'audio_data' in response_data and response_data.get('status') == 'success':
-                # 将字符串转换为二进制数据
-                audio_data = response_data['audio_data'].encode("latin1")
+            request_id = response_data["request_id"]
+            event = response_data["event"]
+            data = response_data["data"]
 
-                # 将音频数据追加到文件
+            if event == EVENT_SessionStarted:
+                output_file = f'output_{request_id}.pcm'
+                print(f"音频将保存到: {output_file}")
+                # 清空或新建文件
+                with open(output_file, 'wb'):
+                    pass  # 创建空文件
+                print('会话已经开始')
+
+            elif event == EVENT_TTSResponse:
+                # 追加写入音频数据
+                audio_data = data.encode("latin1")
                 with open(output_file, 'ab') as f:
                     f.write(audio_data)
-                print(f"已保存音频数据片段 ({len(audio_data)} 字节)")
-            elif 'error' in response_data:
-                print(f"服务器返回错误: {response_data['error']}")
-            elif 'message' in response_data:
-                print(f"服务器返回信息: {response_data['message']}")
+
+            elif event == EVENT_TTSSentenceStart:
+                print('返回句内容开始')
+
+            elif event == EVENT_TTSSentenceEnd:
+                print('返回句内容结束')
+
+            elif event == EVENT_SessionFinished:
+                print('会话已经结束')
+                output_file = None  # 会话结束，重置 output_file
+
+            elif event == EVENT_ConnectionStarted:
+                print('链接建立成功')
+            elif event == EVENT_ConnectionFailed:
+                print('链接建立失败')
+
+            elif event == EVENT_ConnectionFinished:
+                print('连接已经断开')
             else:
-                print(f"收到非音频响应: {response_data.get('action', 'unknown')}")
+                print(f'未处理的事件: {event}')
+
     except websockets.exceptions.ConnectionClosed:
         print("连接已关闭，停止接收。")
     except Exception as e:
