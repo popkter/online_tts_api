@@ -41,7 +41,7 @@ class TTSServer:
                 data = json.loads(message)
                 device_id = data.get('device_id', 'caf')
                 text = data.get('text', '')
-                request_id = data.get('request_id')
+                session_id = data.get('session_id')
                 action = data.get('action', 'synthesize')  # 默认为synthesize
                 audio_format = data.get('audio_format', 'mp3')
                 sample_rate = data.get('sample_rate', 24000)
@@ -50,21 +50,21 @@ class TTSServer:
                 speaker = data.get('voice_type', '')
 
                 try:
-                    print(f'action: {action} request_id: {request_id} text: {text} speaker: {speaker} audio_format: {audio_format}  sample_rate: {sample_rate} speech_rate: {speech_rate} loudness_rate: {loudness_rate}', flush=True)
+                    print(f'action: {action} session_id: {session_id} text: {text} speaker: {speaker} audio_format: {audio_format}  sample_rate: {sample_rate} speech_rate: {speech_rate} loudness_rate: {loudness_rate}', flush=True)
 
-                    if not request_id:
+                    if not session_id:
                         await websocket.send(json.dumps({
-                            'request_id': None,
+                            'session_id': None,
                             'event': -1,
-                            'data': '缺少request_id参数'
+                            'data': '缺少session_id参数'
                         }))
                         continue
 
                     # 处理开始会话请求
                     if action == 'start':
-                        if request_id in self.tts_clients:
+                        if session_id in self.tts_clients:
                             await websocket.send(json.dumps({
-                                'request_id': request_id,
+                                'session_id': session_id,
                                 'event': -1,
                                 'data': '会话已存在'
                             }))
@@ -75,23 +75,23 @@ class TTSServer:
                             payload: str = audio_data.decode("latin1") if audio_data else ''
                             # 发送音频数据给客户端
                             await websocket.send(json.dumps({
-                                'request_id': request_id,
+                                'session_id': session_id,
                                 'event': event_id,
                                 'data': payload
                             }))
 
                         # 根据device_id建立websocket连接
-                        if self.tts_clients.get(device_id) is None:
-                            tts_client = VolcanoWebsocketClient(self.app_id, self.token)
-                            self.tts_clients[request_id] = tts_client
-                            await tts_client.connect(audio_callback)
-                        else:
-                            tts_client = self.tts_clients[device_id]
-                            if tts_client.is_closed():
-                                self.tts_clients.pop(device_id)
-                                tts_client = VolcanoWebsocketClient(self.app_id, self.token)
-                                self.tts_clients[request_id] = tts_client
-                                await tts_client.connect(audio_callback)
+                        try:
+                            if self.tts_clients.get(session_id):
+                                tts_client = self.tts_clients[device_id]
+                                await tts_client.disconnect()
+                                self.tts_clients.pop(session_id)
+                        except KeyError as e:
+                            print(f"start error: session_id: {session_id} tts_client: {self.tts_clients} e: {e.args}")
+
+                        tts_client = VolcanoWebsocketClient(self.app_id, self.token)
+                        self.tts_clients[session_id] = tts_client
+                        await tts_client.connect(audio_callback)
 
                         # 开始流式处理
                         await tts_client.start_session(speaker, audio_format, sample_rate, speech_rate, loudness_rate)
@@ -100,25 +100,25 @@ class TTSServer:
 
                     # 处理结束会话请求
                     if action == 'end':
-                        if request_id not in self.tts_clients:
+                        if session_id not in self.tts_clients:
                             await websocket.send(json.dumps({
-                                'request_id': request_id,
+                                'session_id': session_id,
                                 'event': -1,
                                 'data': "会话不存在"
                             }))
                             continue
 
                         # 关闭TTS客户端连接
-                        tts_client = self.tts_clients[request_id]
+                        tts_client = self.tts_clients[session_id]
                         await tts_client.finish_session()
-                        del self.tts_clients[request_id]
+                        del self.tts_clients[session_id]
                         continue
 
                     # 处理合成请求
                     if action == 'synthesize':
-                        if request_id not in self.tts_clients:
+                        if session_id not in self.tts_clients:
                             await websocket.send(json.dumps({
-                                'request_id': request_id,
+                                'session_id': session_id,
                                 'event': -1,
                                 'data': "会话未开始"
                             }))
@@ -126,33 +126,33 @@ class TTSServer:
 
                         if not text:
                             await websocket.send(json.dumps({
-                                'request_id': request_id,
+                                'session_id': session_id,
                                 'event': -1,
                                 'data': "缺少文本"
                             }))
                             continue
 
                         # 获取TTS客户端并发送文本
-                        tts_client = self.tts_clients[request_id]
+                        tts_client = self.tts_clients[session_id]
                         await tts_client.synthesize(text, speaker)
                         continue
 
                     # 未知动作
                     await websocket.send(json.dumps({
-                        'request_id': request_id,
+                        'session_id': session_id,
                         'event': -1,
                         'data': f'未知动作: {action}'
                     }))
 
                 except json.JSONDecodeError:
                     await websocket.send(json.dumps({
-                        'request_id': request_id,
+                        'session_id': session_id,
                         'event': -1,
                         'data': f'无效的JSON格式{data}'
                     }))
                 except Exception as e:
                     await websocket.send(json.dumps({
-                        'request_id': request_id,
+                        'session_id': session_id,
                         'event': -1,
                         'data': f'{str(e)}'
                     }))
@@ -161,13 +161,13 @@ class TTSServer:
             pass
         finally:
             # 清理客户端连接
-            for request_id, tts_client in list(self.tts_clients.items()):
+            for session_id, tts_client in list(self.tts_clients.items()):
                 try:
                     await tts_client.disconnect()
                 # except:
                 #     pass
                 finally:
-                    del self.tts_clients[request_id]
+                    del self.tts_clients[session_id]
 
     async def process_request(self, connection: ServerConnection, request: Request) -> Optional[Response]:
         headers: Headers = request.headers
