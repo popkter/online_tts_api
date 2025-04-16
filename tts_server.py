@@ -21,8 +21,10 @@ class TTSServer:
         """
         self.host = host
         self.port = port
-        self.tts_clients: Dict[str, VolcanoWebsocketClient] = {}  # 存储每个会话的TTS客户端
-
+        # 修改存储结构，使用嵌套字典，外层用device_id索引，内层用session_id索引
+        self.device_sessions: Dict[str, Dict[str, VolcanoWebsocketClient]] = {}
+        # self.device_single_sessions: Dict[str, VolcanoWebsocketClient] = {}
+        
         # 加载环境变量
         load_dotenv()
         self.app_id = os.getenv("APP_ID")
@@ -50,7 +52,7 @@ class TTSServer:
                 speaker = data.get('voice_type', '')
 
                 try:
-                    print(f'action: {action} session_id: {session_id} text: {text} speaker: {speaker} audio_format: {audio_format}  sample_rate: {sample_rate} speech_rate: {speech_rate} loudness_rate: {loudness_rate}', flush=True)
+                    print(f'action: {action} device_id: {device_id} session_id: {session_id} text: {text} speaker: {speaker}', flush=True)
 
                     if not session_id:
                         await websocket.send(json.dumps({
@@ -58,17 +60,21 @@ class TTSServer:
                             'event': -1,
                             'data': '缺少session_id参数'
                         }))
-                        continue
+                        break
 
                     # 处理开始会话请求
                     if action == 'start':
-                        if session_id in self.tts_clients:
-                            await websocket.send(json.dumps({
-                                'session_id': session_id,
-                                'event': -1,
-                                'data': '会话已存在'
-                            }))
-                            continue
+                        # 如果设备已有会话，关闭所有旧会话
+                        print(f'设备注册状态: {device_id in self.device_sessions}', flush=True)
+                        if device_id in self.device_sessions:
+
+                            print(f"检测到设备已有会话，正在关闭设备的所有会话: {device_id}", flush=True)
+                            for old_session_id, old_client in self.device_sessions[device_id].items():
+                                try:
+                                    await old_client.disconnect()
+                                except Exception as e:
+                                    print(f"关闭旧会话时出错: device_id={device_id}, session_id={old_session_id}, error={e}", flush=True)
+                            self.device_sessions.pop(device_id)
 
                         # 定义音频回调函数
                         async def audio_callback(event_id, audio_data: Optional[bytes] = None):
@@ -80,27 +86,39 @@ class TTSServer:
                                 'data': payload
                             }))
 
-                        # 根据device_id建立websocket连接
+                        # 创建新的TTS客户端并连接
                         try:
-                            if self.tts_clients.get(session_id):
-                                tts_client = self.tts_clients[device_id]
-                                await tts_client.disconnect()
-                                self.tts_clients.pop(session_id)
-                        except KeyError as e:
-                            print(f"start error: session_id: {session_id} tts_client: {self.tts_clients} e: {e.args}")
+                            tts_client = VolcanoWebsocketClient(self.app_id, self.token)
 
-                        tts_client = VolcanoWebsocketClient(self.app_id, self.token)
-                        self.tts_clients[session_id] = tts_client
-                        await tts_client.connect(audio_callback)
+                            # 保存新的客户端
+                            if device_id not in self.device_sessions:
+                                self.device_sessions[device_id] = {}
+                            self.device_sessions[device_id][session_id] = tts_client
 
-                        # 开始流式处理
-                        await tts_client.start_session(speaker, audio_format, sample_rate, speech_rate, loudness_rate)
+                            await tts_client.connect(audio_callback)
+                            
+                            # 开始流式处理
+                            await tts_client.start_session(speaker, audio_format, sample_rate, speech_rate, loudness_rate)
 
+                            
+                            await websocket.send(json.dumps({
+                                'session_id': session_id,
+                                'event': 0,
+                                'data': '会话已开始'
+                            }))
+                        except Exception as e:
+                            print(f"创建新会话时出错: {e}", flush=True)
+                            await websocket.send(json.dumps({
+                                'session_id': session_id,
+                                'event': -1,
+                                'data': f'创建会话失败: {str(e)}'
+                            }))
                         continue
 
                     # 处理结束会话请求
                     if action == 'end':
-                        if session_id not in self.tts_clients:
+                        if (device_id not in self.device_sessions or 
+                            session_id not in self.device_sessions[device_id]):
                             await websocket.send(json.dumps({
                                 'session_id': session_id,
                                 'event': -1,
@@ -109,14 +127,17 @@ class TTSServer:
                             continue
 
                         # 关闭TTS客户端连接
-                        tts_client = self.tts_clients[session_id]
+                        tts_client = self.device_sessions[device_id][session_id]
                         await tts_client.finish_session()
-                        del self.tts_clients[session_id]
+                        # del self.device_sessions[device_id][session_id]
+                        # if not self.device_sessions[device_id]:  # 如果设备没有更多会话，删除设备记录
+                        #     del self.device_sessions[device_id]
                         continue
 
                     # 处理合成请求
                     if action == 'synthesize':
-                        if session_id not in self.tts_clients:
+                        if (device_id not in self.device_sessions or 
+                            session_id not in self.device_sessions[device_id]):
                             await websocket.send(json.dumps({
                                 'session_id': session_id,
                                 'event': -1,
@@ -133,7 +154,7 @@ class TTSServer:
                             continue
 
                         # 获取TTS客户端并发送文本
-                        tts_client = self.tts_clients[session_id]
+                        tts_client = self.device_sessions[device_id][session_id]
                         await tts_client.synthesize(text, speaker)
                         continue
 
@@ -161,13 +182,14 @@ class TTSServer:
             pass
         finally:
             # 清理客户端连接
-            for session_id, tts_client in list(self.tts_clients.items()):
-                try:
-                    await tts_client.disconnect()
-                # except:
-                #     pass
-                finally:
-                    del self.tts_clients[session_id]
+            for device_id in list(self.device_sessions.keys()):
+                for session_id, tts_client in list(self.device_sessions[device_id].items()):
+                    try:
+                        await tts_client.disconnect()
+                    finally:
+                        del self.device_sessions[device_id][session_id]
+                if not self.device_sessions[device_id]:
+                    del self.device_sessions[device_id]
 
     async def process_request(self, connection: ServerConnection, request: Request) -> Optional[Response]:
         headers: Headers = request.headers

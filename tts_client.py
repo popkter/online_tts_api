@@ -21,7 +21,7 @@ async def send_messages(ws):
     # 启动新一轮语音合成
     start_request = {
         "device_id": "caf",
-        "request_id": session_id,
+        "session_id": session_id,
         "action": "start",
         # 音频格式,默认mp3
         "audio_format": "pcm",
@@ -39,17 +39,17 @@ async def send_messages(ws):
 
     # 开始合成音频
     for text_segment in text_segments:
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
         await ws.send(json.dumps({
             "text": text_segment,
-            "request_id": session_id,
+            "session_id": session_id,
             "action": "synthesize",
         }))
         print(f'text_segment -> {text_segment}')
 
     # 结束一轮合成
     end_request = {
-        "request_id": session_id,
+        "session_id": session_id,
         "action": "end",
     }
 
@@ -59,7 +59,7 @@ async def send_messages(ws):
 async def receive_messages(ws: websockets):
     """持续监听服务端消息"""
 
-    output_file = 'output_request_id.pcm'
+    output_file = 'output_session_id.pcm'
 
     try:
         # 创建输出文件
@@ -69,12 +69,12 @@ async def receive_messages(ws: websockets):
 
             response_data = json.loads(message)
             # 检查是否是音频数据
-            request_id = response_data["request_id"]
+            session_id = response_data["session_id"]
             event = response_data["event"]
             data = response_data["data"]
 
             if event == EVENT_SessionStarted:
-                output_file = f'output_{request_id}.pcm'
+                output_file = f'output_{session_id}.pcm'
                 print(f"音频将保存到: {output_file}")
                 # 清空或新建文件
                 with open(output_file, 'wb'):
@@ -105,7 +105,7 @@ async def receive_messages(ws: websockets):
             elif event == EVENT_ConnectionFinished:
                 print('连接已经断开')
             else:
-                print(f'未处理的事件: {event}')
+                print(f'未处理的事件: {event} {data}')
 
     except websockets.exceptions.ConnectionClosed:
         print("连接已关闭，停止接收。")

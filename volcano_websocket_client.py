@@ -37,7 +37,7 @@ class VolcanoWebsocketClient:
         try:
             async for message in self.ws:
                 res = parser_response(message)
-                print("event-->  ", res.optional.event)
+                print(f"event-->  {res.optional.event} sessionId-->  {res.optional.sessionId}", flush=True)
                 if self.audio_callback:
                     await self.audio_callback(res.optional.event, res.payload)
                 if res.optional.event in [EVENT_ConnectionFinished, EVENT_ConnectionFailed]:

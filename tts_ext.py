@@ -283,3 +283,10 @@ async def finish_connection(ws):
     optional = Option(event=EVENT_FinishConnection).as_bytes()
     payload = str.encode('{}')
     return await send_event(ws, header, optional, payload)
+
+if __name__ == '__main__':
+    sid = 'd7008dca-8f20-46a9-bdd5-e0ca50505ae2'
+    encodeId = sid.encode('latin1')
+    targetId = "b'976906b8faec46f09d9206c19ff226fe'"
+    print(f'{targetId == encodeId}')
+    print(encodeId)
