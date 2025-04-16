@@ -1,5 +1,7 @@
 import json
+from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from websockets.asyncio.client import ClientConnection
 
@@ -290,3 +292,11 @@ if __name__ == '__main__':
     targetId = "b'976906b8faec46f09d9206c19ff226fe'"
     print(f'{targetId == encodeId}')
     print(encodeId)
+
+def print_log(self, *args, sep=' ', end='\n', file=None):
+
+    shanghai_time = datetime.now(ZoneInfo("Asia/Shanghai")) + timedelta(seconds=2)
+    current_time = shanghai_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    # current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]  # 格式化时间，保留到毫秒
+    print(f'{current_time}  {self}', *args, sep=' ', end='\n', flush=True, file=file)
+

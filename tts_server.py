@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from datetime import datetime
 from http import HTTPStatus
 from typing import Dict, Optional
 
@@ -10,6 +11,7 @@ from websockets import Headers
 from websockets.asyncio.server import ServerConnection
 from websockets.http11 import Response, Request
 
+from tts_ext import print_log
 from volcano_websocket_client import VolcanoWebsocketClient
 
 class TTSServer:
@@ -52,7 +54,7 @@ class TTSServer:
                 speaker = data.get('voice_type', '')
 
                 try:
-                    print(f'action: {action} device_id: {device_id} session_id: {session_id} text: {text} speaker: {speaker}', flush=True)
+                    print_log(f'action: {action} device_id: {device_id} session_id: {session_id} text: {text} speaker: {speaker}')
 
                     if not session_id:
                         await websocket.send(json.dumps({
@@ -65,15 +67,16 @@ class TTSServer:
                     # 处理开始会话请求
                     if action == 'start':
                         # 如果设备已有会话，关闭所有旧会话
-                        print(f'设备注册状态: {device_id in self.device_sessions}', flush=True)
+                        print_log(f'设备注册状态: {device_id in self.device_sessions}')
                         if device_id in self.device_sessions:
 
-                            print(f"检测到设备已有会话，正在关闭设备的所有会话: {device_id}", flush=True)
+                            print_log(f"检测到设备已有会话，正在关闭设备的所有会话: {device_id}")
                             for old_session_id, old_client in self.device_sessions[device_id].items():
                                 try:
-                                    await old_client.disconnect()
+                                    asyncio.create_task(old_client.disconnect())
+                                    # await old_client.disconnect()
                                 except Exception as e:
-                                    print(f"关闭旧会话时出错: device_id={device_id}, session_id={old_session_id}, error={e}", flush=True)
+                                    print_log(f"关闭旧会话时出错: device_id={device_id}, session_id={old_session_id}, error={e}")
                             self.device_sessions.pop(device_id)
 
                         # 定义音频回调函数
@@ -107,7 +110,7 @@ class TTSServer:
                                 'data': '会话已开始'
                             }))
                         except Exception as e:
-                            print(f"创建新会话时出错: {e}", flush=True)
+                            print_log(f"创建新会话时出错: {e}")
                             await websocket.send(json.dumps({
                                 'session_id': session_id,
                                 'event': -1,
@@ -215,8 +218,9 @@ class TTSServer:
             self.port,
             process_request=self.process_request  # 鉴权逻辑放这里
         )
-        print(f"TTS服务器已启动，监听地址: ws://{self.host}:{self.port}", flush=True)
+        print_log(f"TTS服务器已启动，监听地址: ws://{self.host}:{self.port}")
         await server.wait_closed()
+
 
 
 async def main():

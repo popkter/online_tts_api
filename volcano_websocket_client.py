@@ -6,7 +6,7 @@ import websockets
 
 from tts_ext import start_connection, parser_response, start_session, \
     send_text, finish_session, finish_connection, EVENT_ConnectionFinished, \
-    EVENT_ConnectionFailed
+    EVENT_ConnectionFailed, print_log
 
 
 class VolcanoWebsocketClient:
@@ -37,7 +37,7 @@ class VolcanoWebsocketClient:
         try:
             async for message in self.ws:
                 res = parser_response(message)
-                print(f"event-->  {res.optional.event} sessionId-->  {res.optional.sessionId}", flush=True)
+                print_log(f"event-->  {res.optional.event} sessionId-->  {res.optional.sessionId} payload_type--> {res.header.message_type}" )
                 if self.audio_callback:
                     await self.audio_callback(res.optional.event, res.payload)
                 if res.optional.event in [EVENT_ConnectionFinished, EVENT_ConnectionFailed]:
